@@ -1,0 +1,2 @@
+lambda_handler_name = "???.???"
+application_jar_name = "../source/???.zip"

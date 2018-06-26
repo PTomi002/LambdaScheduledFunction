@@ -1,0 +1,62 @@
+image: ???
+
+stages:
+  - package
+  - plan
+  - create
+  - destroy
+
+before_script:
+  - CI_COMMIT_REF_NAME=${CI_COMMIT_REF_NAME:-"dev"}
+  - echo "Set AWS deployment keys for ${CI_COMMIT_REF_NAME}..."
+#  Should be the key in the Secret Variables with name:
+  #<branch name>_AWS_ACCESS_KEY_ID
+  - export AWS_ACCESS_KEY_ID=`printenv | grep "^${CI_COMMIT_REF_NAME}_AWS_ACCESS_KEY_ID" |  grep -Eo '=.*' | cut -c 2-`
+  - export AWS_SECRET_ACCESS_KEY=`printenv | grep "^${CI_COMMIT_REF_NAME}_AWS_SECRET_ACCESS_KEY" |  grep -Eo '=.*' | cut -c 2-`
+  - echo "Fetch and export environmental variables into runner..."
+#  Should be a config repo (with same branch name as this pipeline was executed from) from where the git archive can download the configuration:
+  #export S3_BUCKET="???"
+  #export S3_BUCKET_KEY="???"
+  #export S3_BUCKET_REGION="eu-central-1"
+  - echo "git archive --format=tar --remote '${CONFIG_REPO_URL}' '$CI_COMMIT_REF_NAME:' | tar -zxvf -C $CI_PROJECT_DIR;"
+  - git archive --format=tgz --remote "${CONFIG_REPO_URL}" "$CI_COMMIT_REF_NAME:" | tar -zxvf - -C $CI_PROJECT_DIR;
+  - cat env
+  - source ./env
+
+package:
+  stage: package
+  script:
+    - echo "Check if deployment package exists or not..."
+    - ls -lt source/LambdaManualBackup.zip
+
+plan:
+  stage: plan
+  script:
+    - echo "Plan infrastructure for lambda backup..."
+    - cd infrastructure
+    - terraform init -backend-config="region=${S3_BUCKET_REGION}" -backend-config="bucket=${S3_BUCKET}" -backend-config="key=${S3_BUCKET_KEY}"
+    - terraform plan
+
+create:
+  stage: create
+  when: manual
+  script:
+    - echo "Create infrastructure for lambda backup..."
+    - cd infrastructure
+    - terraform init -backend-config="region=${S3_BUCKET_REGION}" -backend-config="bucket=${S3_BUCKET}" -backend-config="key=${S3_BUCKET_KEY}"
+    - terraform apply
+  environment:
+    name: ${CI_COMMIT_REF_NAME}
+    on_stop: destroy
+
+destroy:
+  stage: destroy
+  when: manual
+  script:
+    - echo "Destroy infrastructure of lambda backup..."
+    - cd infrastructure
+    - terraform init -backend-config="region=${S3_BUCKET_REGION}" -backend-config="bucket=${S3_BUCKET}" -backend-config="key=${S3_BUCKET_KEY}"
+    - terraform destroy --force
+  environment:
+    name: ${CI_COMMIT_REF_NAME}
+    action: stop
